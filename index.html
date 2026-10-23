@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matchers Under Rotation</title>
+<meta name="description" content="How ten image point matchers (LoMa, LoFTR, RoMa, LightGlue, SIFT, MASt3R) cope as one drone image is rotated through 360 degrees.">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --accent: #2a78d6;
+  --good: #0ca30c;
+  --bad: #d03b3b;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10); --accent: #3987e5;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10); --accent: #3987e5;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--text);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 1120px; margin: 0 auto; padding: 48px 16px 64px; }
+h1 { font-size: clamp(28px, 4.5vw, 42px); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.01em; }
+h2 { font-size: 22px; margin: 56px 0 6px; }
+.lede { color: var(--text-2); font-size: 18px; max-width: 760px; margin: 0; }
+.sub { color: var(--text-2); margin: 0 0 18px; max-width: 760px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.methods { display: flex; flex-wrap: wrap; gap: 8px; margin: 28px 0 14px; }
+.methods button {
+  display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); border-radius: 999px; padding: 6px 14px;
+  font: inherit; font-size: 14px; cursor: pointer;
+}
+.methods button[aria-pressed="true"] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+.chip { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.sw { width: 24px; height: 10px; flex: none; overflow: visible; }
+.viewer canvas { width: 100%; aspect-ratio: 2 / 1; display: block; border-radius: 8px; background: #000; }
+.controls { display: flex; align-items: center; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+.controls input[type=range] { flex: 1; min-width: 180px; accent-color: var(--accent); }
+.controls button {
+  font: inherit; font-size: 14px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--page); color: var(--text); padding: 6px 14px; cursor: pointer; min-width: 84px;
+}
+.angle { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 52px; }
+.key { display: flex; gap: 16px; font-size: 14px; color: var(--text-2); }
+.key span::before { content: ""; display: inline-block; width: 18px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: currentColor; }
+.key .ok { color: var(--good); } .key .bad { color: var(--bad); }
+.key .ok i, .key .bad i { color: var(--text-2); font-style: normal; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 14px; }
+.stat { background: var(--page); border-radius: 8px; padding: 10px 14px; }
+.stat b { display: block; font-size: 24px; line-height: 1.2; }
+.stat span { font-size: 13px; color: var(--text-2); }
+.chart { position: relative; }
+.chart svg { width: 100%; display: block; overflow: visible; }
+.chart svg.sw { width: 24px; display: inline-block; }
+.chart text { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.chart .title { fill: var(--text); font-size: 14px; font-weight: 600; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--text-2); margin: 4px 0 8px; }
+.legend button { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 2px 0; }
+.legend button[aria-pressed="true"] { color: var(--text); font-weight: 600; }
+.tip {
+  position: absolute; pointer-events: none; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.12); display: none; min-width: 190px; z-index: 2;
+}
+.tip .row { display: flex; align-items: center; gap: 8px; }
+.tip .row b { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+.tip .row.sel { font-weight: 600; }
+.charts { display: grid; gap: 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); }
+th { color: var(--text-2); font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table-wrap { overflow-x: auto; }
+.notes { color: var(--text-2); max-width: 760px; }
+.notes li { margin-bottom: 6px; }
+footer { margin-top: 56px; color: var(--muted); font-size: 14px; }
+a { color: var(--accent); }
+@media (max-width: 640px) {
+  main { padding-top: 28px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat b { font-size: 20px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Spin the drone photo: which point matchers keep up?</h1>
+  <p class="lede">Two overlapping aerial frames, cropped to circles. The right one is rotated through a full
+    turn in 5° steps, and ten matchers try to find corresponding points at every angle. Green lines
+    agree with the true camera geometry; red ones do not.</p>
+
+  <div class="methods" id="methods" role="group" aria-label="Matcher"></div>
+
+  <section class="card viewer">
+    <canvas id="pair" aria-label="Image pair with point matches"></canvas>
+    <div class="controls">
+      <button id="play" type="button">▶ Play</button>
+      <input id="angle" type="range" min="0" max="71" step="1" value="0" aria-label="Rotation angle">
+      <span class="angle" id="angleLabel">0°</span>
+      <div class="key"><span class="ok"><i>✓ correct</i></span><span class="bad"><i>✗ wrong</i></span></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="sMatches">–</b><span>matches returned</span></div>
+      <div class="stat"><b id="sCorrect">–</b><span>correct matches</span></div>
+      <div class="stat"><b id="sPrec">–</b><span>precision</span></div>
+      <div class="stat"><b id="sTime">–</b><span>time per pair</span></div>
+    </div>
+  </section>
+
+  <h2>Precision through a full rotation</h2>
+  <p class="sub">Share of returned matches that are correct. Colour marks the method family and line style
+    the variant. Hover to compare at one angle, click to jump the viewer there, or pick a method in the legend.</p>
+  <div class="charts">
+    <div class="card chart" id="chartPrec"></div>
+  </div>
+
+  <h2>How many correct matches survive</h2>
+  <p class="sub">Correct matches per angle, on a log scale. Dense and semi-dense methods (LoFTR, RoMa,
+    RoMa v2, MASt3R) return a fixed or very large budget of matches, so compare their counts with care; precision is the fairer
+    comparison.</p>
+  <div class="charts">
+    <div class="card chart" id="chartCount"></div>
+  </div>
+
+  <h2>Summary</h2>
+  <p class="sub">Sorted by worst-case precision over all 72 angles.</p>
+  <div class="card table-wrap"><table id="summary"></table></div>
+
+  <h2>How this was measured</h2>
+  <ul class="notes" id="notes">
+    <li>Two consecutive frames from a fixed-wing drone survey, center-cropped to circles and resized to
+      <span data-k="work_px"></span>&nbsp;px, so rotating one never pushes image content out of frame.</li>
+    <li>Every method sees exactly the same 72 rotated copies of the right image (0°–355°, counter-clockwise),
+      with each method's default settings and its own internal resizing.</li>
+    <li>Because the rotation is known, each match in the rotated image can be mapped back to the original.
+      A match counts as correct when its epipolar (Sampson) error is below <span data-k="tol_px"></span>&nbsp;px
+      under a fundamental matrix fitted with MAGSAC to the pooled 0° matches of all methods. The scene has
+      real depth (buildings, trees), so an epipolar check is used rather than a single homography.</li>
+    <li>RoMa and RoMa v2 are sampled to 5,000 matches; MASt3R uses reciprocal nearest neighbours on an 8&nbsp;px
+      grid at 512&nbsp;px; LoFTR (outdoor weights) runs at 840&nbsp;px. Sparse methods (SuperPoint and ALIKED
+      with 2,048 keypoints) return whatever their default filtering keeps.</li>
+    <li>Matches with either end in the black area outside the image circle are discarded for every method
+      before scoring; LoFTR in particular pairs up the featureless black corners.</li>
+    <li>RoMa v2 runs at its default "precise" setting. Its fused correlation kernel had no build for the
+      PyTorch version used, and the native fallback ran out of memory on a 12&nbsp;GB GPU, so it was patched to
+      compute the same correlation in row chunks.</li>
+    <li>Timings are on an NVIDIA GTX TITAN X (2015, Maxwell): useful to compare methods, but far slower
+      than a current GPU.</li>
+    <li>One image pair is an anecdote, not a benchmark. Easy, textured top-down scenes flatter everyone.</li>
+  </ul>
+
+  <footer>Code to reproduce everything is in this repository's <code>bench/</code> folder.</footer>
+</main>
+
+<script>
+const COLORS = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7", "--s8"];
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = n => n.toLocaleString("en-US");
+const pct = v => (100 * v).toFixed(1) + "%";
+const DASH = { solid: "", dash: "7 5", dot: "0.5 5" };
+// legend swatch: a short line in the family colour with the variant's dash pattern
+const swatch = m => `<svg class="sw" viewBox="0 0 24 10" aria-hidden="true"><line x1="2" y1="5" x2="22" y2="5" stroke="${css(m.color)}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${DASH[m.dash]}"/></svg>`;
+const state = { data: null, method: 0, angle: 0, playing: null, imgs: {} };
+const charts = [];
+
+function loadImage(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+}
+
+Promise.all([fetch("assets/data.json").then(r => r.json()), loadImage("assets/A.jpg"), loadImage("assets/B.jpg")])
+  .then(([data, A, B]) => {
+    state.data = data; state.imgs = { A, B };
+    data.methods.forEach((m, i) => {
+      m.color = COLORS[m.family];
+      m.precision = m.correct.map((c, k) => m.matches[k] ? c / m.matches[k] : 0);
+    });
+    document.querySelectorAll("[data-k]").forEach(el => el.textContent = data[el.dataset.k]);
+    document.getElementById("angle").max = data.angles.length - 1;
+    buildMethodButtons();
+    charts.push(lineChart("chartPrec", { title: "Precision (% correct)", value: m => m.precision,
+      domain: [0, 1], ticks: [0, .25, .5, .75, 1], fmt: v => Math.round(v * 100) + "%", tipFmt: pct }));
+    const maxC = Math.max(...data.methods.flatMap(m => m.correct));
+    charts.push(lineChart("chartCount", { title: "Correct matches (log scale)", value: m => m.correct,
+      log: true, domain: [1, Math.pow(10, Math.ceil(Math.log10(maxC)))],
+      fmt: v => v >= 1000 ? (v / 1000) + "k" : v, tipFmt: fmt }));
+    buildSummary();
+    readHash();
+    update();
+    window.addEventListener("hashchange", () => { readHash(); update(); });
+    new ResizeObserver(() => { drawPair(); charts.forEach(c => c.render()); }).observe(document.querySelector("main"));
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { charts.forEach(c => c.render()); buildMethodButtons(); });
+  });
+
+function readHash() {
+  const [id, a] = decodeURIComponent(location.hash.slice(1)).split("@");
+  const mi = state.data.methods.findIndex(m => m.id === id);
+  if (mi >= 0) state.method = mi;
+  const ai = state.data.angles.indexOf(+a);
+  if (a !== undefined && ai >= 0) state.angle = ai;
+}
+
+function buildMethodButtons() {
+  const wrap = document.getElementById("methods");
+  wrap.innerHTML = "";
+  state.data.methods.forEach((m, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.innerHTML = `${swatch(m)}${m.name}`;
+    b.setAttribute("aria-pressed", i === state.method);
+    b.onclick = () => { state.method = i; update(); };
+    wrap.appendChild(b);
+  });
+}
+
+function update() {
+  const { data, method, angle } = state;
+  const m = data.methods[method];
+  document.querySelectorAll("#methods button").forEach((b, i) => b.setAttribute("aria-pressed", i === method));
+  document.getElementById("angle").value = angle;
+  document.getElementById("angleLabel").textContent = data.angles[angle] + "°";
+  document.getElementById("sMatches").textContent = fmt(m.matches[angle]);
+  document.getElementById("sCorrect").textContent = fmt(m.correct[angle]);
+  document.getElementById("sPrec").textContent = pct(m.precision[angle]);
+  const s = m.seconds[angle];
+  document.getElementById("sTime").textContent = s < 1 ? Math.round(s * 1000) + " ms" : s.toFixed(1) + " s";
+  drawPair();
+  charts.forEach(c => c.render());
+  if (!state.playing) history.replaceState(null, "", `#${m.id}@${data.angles[angle]}`);
+}
+
+function drawPair() {
+  const cv = document.getElementById("pair");
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, side = W / 2;
+  cv.width = W * dpr; cv.height = side * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.drawImage(state.imgs.A, 0, 0, side, side);
+  ctx.save();
+  ctx.translate(side * 1.5, side / 2);
+  // images were rotated counter-clockwise; canvas rotates clockwise for positive angles
+  ctx.rotate(-state.data.angles[state.angle] * Math.PI / 180);
+  ctx.drawImage(state.imgs.B, -side / 2, -side / 2, side, side);
+  ctx.restore();
+  const samples = state.data.methods[state.method].samples[state.angle];
+  const good = css("--good"), bad = css("--bad");
+  for (const pass of [1, 0]) {  // correct first, wrong on top so they stay visible
+    ctx.strokeStyle = ctx.fillStyle = pass ? good : bad;
+    ctx.lineWidth = Math.max(1.25, W / 700);
+    for (const [xa, ya, xb, yb, ok] of samples) {
+      if (ok !== pass) continue;
+      const x1 = xa * side, y1 = ya * side, x2 = side + xb * side, y2 = yb * side;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      for (const [x, y] of [[x1, y1], [x2, y2]]) { ctx.beginPath(); ctx.arc(x, y, ctx.lineWidth * 1.6, 0, 7); ctx.fill(); }
+    }
+  }
+}
+
+const slider = document.getElementById("angle");
+slider.addEventListener("input", () => { state.angle = +slider.value; update(); });
+document.getElementById("play").addEventListener("click", e => {
+  if (state.playing) { clearInterval(state.playing); state.playing = null; e.target.textContent = "▶ Play"; return; }
+  e.target.textContent = "❚❚ Pause";
+  state.playing = setInterval(() => { state.angle = (state.angle + 1) % state.data.angles.length; update(); }, 220);
+});
+
+function lineChart(id, opt) {
+  const el = document.getElementById(id);
+  const legend = document.createElement("div"); legend.className = "legend"; el.appendChild(legend);
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg"); el.appendChild(svg);
+  const tip = document.createElement("div"); tip.className = "tip"; el.appendChild(tip);
+  const M = { t: 36, r: 12, b: 34, l: 46 };
+  let hover = null;
+
+  function render() {
+    const { data } = state;
+    const W = el.clientWidth - 32, H = Math.max(240, Math.min(340, W * 0.42));
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+    const iw = W - M.l - M.r, ih = H - M.t - M.b;
+    const xs = a => M.l + (a / 360) * iw;
+    const [d0, d1] = opt.domain;
+    const ys = opt.log
+      ? v => M.t + ih - (Math.log10(Math.max(v, d0)) - Math.log10(d0)) / (Math.log10(d1) - Math.log10(d0)) * ih
+      : v => M.t + ih - (v - d0) / (d1 - d0) * ih;
+    const ticks = opt.ticks || Array.from({ length: Math.log10(d1) - Math.log10(d0) + 1 }, (_, i) => d0 * 10 ** i);
+    let s = `<text class="title" x="0" y="14">${opt.title}</text>`;
+    for (const t of ticks) {
+      const y = ys(t);
+      s += `<line x1="${M.l}" x2="${W - M.r}" y1="${y}" y2="${y}" stroke="${css("--grid")}" />`;
+      s += `<text x="${M.l - 8}" y="${y + 4}" text-anchor="end">${opt.fmt(t)}</text>`;
+    }
+    s += `<line x1="${M.l}" x2="${W - M.r}" y1="${M.t + ih}" y2="${M.t + ih}" stroke="${css("--axis")}" />`;
+    for (let a = 0; a <= 360; a += 45) {
+      s += `<text x="${xs(a)}" y="${H - 12}" text-anchor="middle">${a}°</text>`;
+    }
+    s += `<line x1="${xs(data.angles[state.angle])}" x2="${xs(data.angles[state.angle])}" y1="${M.t}" y2="${M.t + ih}" stroke="${css("--muted")}" stroke-dasharray="3 3" />`;
+    const order = data.methods.map((_, i) => i).filter(i => i !== state.method).concat(state.method);
+    for (const i of order) {
+      const m = data.methods[i], vals = opt.value(m), sel = i === state.method;
+      // close the loop: 360° is the same image as 0°
+      const pts = data.angles.map((a, k) => [xs(a), ys(vals[k])]).concat([[xs(360), ys(vals[0])]]);
+      s += `<polyline fill="none" stroke="${css(m.color)}" stroke-width="${sel ? 3 : 1.75}" stroke-dasharray="${DASH[m.dash]}" stroke-linejoin="round" stroke-linecap="round" opacity="${sel ? 1 : 0.55}" points="${pts.map(p => p.join(",")).join(" ")}" />`;
+    }
+    if (hover !== null) {
+      const x = xs(data.angles[hover]);
+      s += `<line x1="${x}" x2="${x}" y1="${M.t}" y2="${M.t + ih}" stroke="${css("--text-2")}" />`;
+      for (const m of data.methods) {
+        s += `<circle cx="${x}" cy="${ys(opt.value(m)[hover])}" r="4" fill="${css(m.color)}" stroke="${css("--surface")}" stroke-width="2" />`;
+      }
+    }
+    s += `<rect x="${M.l}" y="${M.t}" width="${iw}" height="${ih}" fill="transparent" class="hit" />`;
+    svg.innerHTML = s;
+    const hit = svg.querySelector(".hit");
+    const idxAt = ev => {
+      const r = svg.getBoundingClientRect();
+      const a = ((ev.clientX - r.left) * (W / r.width) - M.l) / iw * 360;
+      return Math.max(0, Math.min(data.angles.length - 1, Math.round(a / (data.angles[1] - data.angles[0]))));
+    };
+    hit.onmousemove = ev => { hover = idxAt(ev); render(); showTip(ev, hover); };
+    hit.onmouseleave = () => { hover = null; tip.style.display = "none"; render(); };
+    hit.onclick = ev => { state.angle = idxAt(ev); update(); };
+
+    legend.innerHTML = "";
+    data.methods.forEach((m, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("aria-pressed", i === state.method);
+      b.innerHTML = `${swatch(m)}${m.name}`;
+      b.onclick = () => { state.method = i; update(); };
+      legend.appendChild(b);
+    });
+  }
+
+  function showTip(ev, k) {
+    const { data } = state;
+    const rows = data.methods.map((m, i) => ({ m, i, v: opt.value(m)[k] })).sort((a, b) => b.v - a.v);
+    tip.innerHTML = `<div style="margin-bottom:4px;color:${css("--text-2")}">${data.angles[k]}° rotation</div>` +
+      rows.map(r => `<div class="row${r.i === state.method ? " sel" : ""}">${swatch(r.m)}${r.m.name}<b>${opt.tipFmt(r.v)}</b></div>`).join("");
+    tip.style.display = "block";
+    const r = el.getBoundingClientRect();
+    let x = ev.clientX - r.left + 14;
+    if (x + tip.offsetWidth > r.width) x = ev.clientX - r.left - tip.offsetWidth - 14;
+    tip.style.left = Math.max(4, x) + "px";
+    tip.style.top = Math.max(4, ev.clientY - r.top - tip.offsetHeight / 2) + "px";
+  }
+
+  return { render };
+}
+
+function buildSummary() {
+  const { data } = state;
+  const rows = data.methods.map(m => {
+    const p = m.precision, worst = Math.min(...p);
+    const sec = [...m.seconds].sort((a, b) => a - b)[Math.floor(m.seconds.length / 2)];
+    return { m, worst, worstAt: data.angles[p.indexOf(worst)], mean: p.reduce((a, b) => a + b) / p.length,
+      correct: Math.round(m.correct.reduce((a, b) => a + b) / m.correct.length), sec };
+  }).sort((a, b) => b.worst - a.worst);
+  document.getElementById("summary").innerHTML =
+    `<thead><tr><th>Method</th><th>Type</th><th class="num">Worst precision</th><th class="num">Mean precision</th><th class="num">Mean correct matches</th><th class="num">Median time / pair</th></tr></thead><tbody>` +
+    rows.map(r => `<tr><td><span style="display:inline-flex;align-items:center;gap:8px">${swatch(r.m)}${r.m.name}</span></td>
+      <td>${r.m.dense ? (r.m.id === "loftr" ? "semi-dense" : "dense") : "sparse"}</td>
+      <td class="num">${pct(r.worst)} <span style="color:var(--muted)">@ ${r.worstAt}°</span></td>
+      <td class="num">${pct(r.mean)}</td><td class="num">${fmt(r.correct)}</td>
+      <td class="num">${r.sec < 1 ? Math.round(r.sec * 1000) + " ms" : r.sec.toFixed(1) + " s"}</td></tr>`).join("") + "</tbody>";
+}
+</script>
+</body>
+</html>
