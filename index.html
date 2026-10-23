@@ -262,6 +262,8 @@ function drawPair() {
   ctx.scale(dpr, dpr);
   ctx.drawImage(state.imgs.A, 0, 0, side, side);
   ctx.save();
+  // keep the rotated square's black corners from spilling over image A
+  ctx.beginPath(); ctx.rect(side, 0, side, side); ctx.clip();
   ctx.translate(side * 1.5, side / 2);
   // images were rotated counter-clockwise; canvas rotates clockwise for positive angles
   ctx.rotate(-state.data.angles[state.angle] * Math.PI / 180);
